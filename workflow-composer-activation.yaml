@@ -1,0 +1,131 @@
+main:
+  params: [input]
+  steps:
+    - init:
+        assign:
+          - project_id: "ardent-quarter-454807-h6"
+          - location: "europe-west2"
+          - environment_name: "composer-environment"
+          - service_account: "112344579998-compute@developer.gserviceaccount.com"
+          - action: ${input.action}
+    
+    - check_action:
+        switch:
+          - condition: ${action == "start"}
+            next: start_environment
+          - condition: ${action == "stop"}
+            next: stop_environment
+        next: invalid_action
+    
+    - start_environment:
+        call: http.post
+        args:
+          url: ${"https://composer.googleapis.com/v1/projects/" + project_id + "/locations/" + location + "/environments"}
+          auth:
+            type: OAuth2
+          headers:
+            Content-Type: "application/json"
+          body:
+            name: ${"projects/" + project_id + "/locations/" + location + "/environments/" + environment_name}
+            config:
+              softwareConfig:
+                imageVersion: "composer-3-airflow-2.10.5-build.5"
+              nodeConfig:
+                serviceAccount: ${service_account}
+              workloadsConfig:
+                scheduler:
+                  cpu: 1
+                  memoryGb: 4
+                  storageGb: 1
+                  count: 1
+                dagProcessor:
+                  cpu: 1
+                  memoryGb: 4
+                  storageGb: 1
+                  count: 1
+                triggerer:
+                  cpu: 0.5
+                  memoryGb: 1
+                  count: 1
+                webServer:
+                  cpu: 1
+                  memoryGb: 2
+                worker:
+                  cpu: 0.5
+                  memoryGb: 2
+                  storageGb: 10
+                  minCount: 1
+                  maxCount: 3
+              environmentSize: "ENVIRONMENT_SIZE_SMALL"
+            storageConfig:
+              bucket: "composer-bucket-west2"
+        result: start_result
+        next: log_start
+    
+    - log_start:
+        call: sys.log
+        args:
+          text: "Iniciando creación del entorno Composer"
+        next: wait_for_environment
+    
+    - wait_for_environment:
+        call: sys.sleep
+        args:
+          seconds: 1800  # Esperar 30 minutos para que se cree
+        next: install_packages
+    
+    - install_packages:
+        call: http.patch
+        args:
+          url: ${"https://composer.googleapis.com/v1/projects/" + project_id + "/locations/" + location + "/environments/" + environment_name + "?updateMask=config.softwareConfig.pypiPackages"}
+          auth:
+            type: OAuth2
+          headers:
+            Content-Type: "application/json"
+          body:
+            config:
+              softwareConfig:
+                pypiPackages:
+                  xgboost: "==3.0.0"
+                  lightgbm: "==4.5.0"
+                  catboost: "==1.2.5"
+                  seaborn: "==0.13.2"
+                  matplotlib: "==3.10.1"
+                  bayesian-optimization: "==2.0.3"
+                  statsmodels: "==0.14.4"
+                  together: "==1.5.17"
+                  sacrebleu: "==2.5.1"
+                  beautifulsoup4: "==4.13.4"
+                  selenium: "==4.34.2"
+        result: packages_result
+        next: log_packages
+    
+    - log_packages:
+        call: sys.log
+        args:
+          text: "Paquetes Python instalados correctamente"
+        next: workflow_complete
+    
+    - stop_environment:
+        call: http.delete
+        args:
+          url: ${"https://composer.googleapis.com/v1/projects/" + project_id + "/locations/" + location + "/environments/" + environment_name}
+          auth:
+            type: OAuth2
+        result: stop_result
+        next: log_stop
+    
+    - log_stop:
+        call: sys.log
+        args:
+          text: "Iniciando eliminación del entorno Composer"
+        next: workflow_complete
+    
+    - invalid_action:
+        call: sys.log
+        args:
+          text: "Acción inválida. Use start o stop"
+        next: workflow_complete
+    
+    - workflow_complete:
+        return: ${action + " workflow completado"}
